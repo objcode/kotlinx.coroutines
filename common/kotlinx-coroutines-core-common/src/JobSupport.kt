@@ -1079,9 +1079,7 @@ public open class JobSupport constructor(active: Boolean) : Job, ChildJob, Paren
             if (state !is Incomplete) {
                 // already complete -- just return result
                 if (state is CompletedExceptionally) { // Slow path to recover stacktrace
-                    suspendCoroutineUninterceptedOrReturn<Unit> {
-                        throw recoverStackTrace(state.cause, it)
-                    }
+                    recoverAndThrow(state.cause)
                 }
                 return state
 
