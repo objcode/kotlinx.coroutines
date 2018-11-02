@@ -4,6 +4,8 @@
 
 package kotlinx.coroutines
 
+import kotlinx.coroutines.internal.*
+
 public expect open class TestBase constructor() {
     public val isStressTest: Boolean
     public val stressTestMultiplier: Int
@@ -21,8 +23,9 @@ public expect open class TestBase constructor() {
     )
 }
 
-public class TestException(message: String? = null) : Throwable(message)
-public class TestException1(message: String? = null) : Throwable(message)
-public class TestException2(message: String? = null) : Throwable(message)
-public class TestException3(message: String? = null) : Throwable(message)
-public class TestRuntimeException(message: String? = null) : RuntimeException(message)
+public class TestException(message: String? = null) : Throwable(message), NonRecoverableThrowable
+public class TestException1(message: String? = null) : Throwable(message), NonRecoverableThrowable
+public class TestException2(message: String? = null) : Throwable(message), NonRecoverableThrowable
+public class TestException3(message: String? = null) : Throwable(message), NonRecoverableThrowable
+public class TestRuntimeException(message: String? = null) : RuntimeException(message), NonRecoverableThrowable
+public class RecoverableTestException(message: String? = null) : Throwable(message)
