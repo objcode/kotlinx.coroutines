@@ -86,8 +86,6 @@ internal actual fun <E : Throwable> unwrap(exception: E): E {
 private fun <E : Throwable> recoveryDisabled(exception: E) =
     !RECOVER_STACKTRACE || !DEBUG || exception is CancellationException || exception is NonRecoverableThrowable
 
-
-
 private fun createStackTrace(continuation: CoroutineStackFrame): ArrayList<StackTraceElement> {
     val stack = ArrayList<StackTraceElement>()
     continuation.getStackTraceElement()?.let { stack.add(sanitize(it)) }
@@ -104,7 +102,6 @@ internal fun sanitize(element: StackTraceElement): StackTraceElement {
     if (!element.className.contains('/')) {
         return element
     }
-
     // STE generated with debug metadata contains '/' as separators in FQN, while Java contains dots
     return StackTraceElement(element.className.replace('/', '.'), element.methodName, element.fileName, element.lineNumber)
 }
