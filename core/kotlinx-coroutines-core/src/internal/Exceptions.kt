@@ -19,16 +19,10 @@ internal actual fun <E : Throwable> recoverStackTrace(exception: E): E {
 }
 
 private fun <E : Throwable> E.sanitizeStackTrace(): E {
+    val stackTrace = stackTrace
     val size = stackTrace.size
 
-    var lastIntrinsic = -1
-    for (i in 0 until size) {
-        val name = stackTrace[i].className
-        if ("kotlinx.coroutines.internal.ExceptionsKt" == name) {
-            lastIntrinsic = i
-        }
-    }
-
+    val lastIntrinsic = stackTrace.indexOfFirst { "kotlinx.coroutines.internal.ExceptionsKt" == it.className }
     val startIndex = lastIntrinsic + 1
     val trace = Array(size - lastIntrinsic) {
         if (it == 0) {
@@ -38,7 +32,7 @@ private fun <E : Throwable> E.sanitizeStackTrace(): E {
         }
     }
 
-    stackTrace = trace
+    setStackTrace(trace)
     return this
 }
 
@@ -74,6 +68,12 @@ internal actual fun <E : Throwable> unwrap(exception: E): E {
         return exception
     }
 
+    val cause = exception.cause
+    // Fast-path to avoid array cloning
+    if (cause == null || cause.javaClass != exception.javaClass) {
+        return exception
+    }
+
     val element = exception.stackTrace.firstOrNull() ?: return exception
     if (element.isArtificial()) {
         @Suppress("UNCHECKED_CAST")
@@ -102,7 +102,7 @@ internal fun sanitize(element: StackTraceElement): StackTraceElement {
     if (!element.className.contains('/')) {
         return element
     }
-    // STE generated with debug metadata contains '/' as separators in FQN, while Java contains dots
+    // KT-28237: STE generated with debug metadata contains '/' as separators in FQN, while Java contains dots
     return StackTraceElement(element.className.replace('/', '.'), element.methodName, element.fileName, element.lineNumber)
 }
 internal fun artificialFrame(message: String) = java.lang.StackTraceElement("\b\b\b($message", "\b", "\b", -1)
