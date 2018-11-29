@@ -48,9 +48,29 @@ private fun <E : Throwable> recoverFromStackFrame(exception: E, continuation: Co
     val newException = tryCopyException(exception) ?: return exception
     val stacktrace = createStackTrace(continuation)
     if (stacktrace.isEmpty()) return exception
+    val copied = meaningfulActualStackTrace(exception)
     stacktrace.add(0, artificialFrame("Current coroutine stacktrace"))
-    newException.stackTrace = stacktrace.toTypedArray()
+    newException.stackTrace = (copied + stacktrace).toTypedArray() // TODO optimizable
     return newException
+}
+
+/*
+ * Returns slice of the original stacktrace from the original exception.
+ * E.g. for
+ * at kotlinx.coroutines.PlaygroundKt.foo(PlaygroundKt.kt:14)
+ * at kotlinx.coroutines.PlaygroundKt$foo$1.invokeSuspend(PlaygroundKt.kt)
+ * at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:32)
+ * at kotlinx.coroutines.ResumeModeKt.resumeMode(ResumeMode.kt:67)
+ * at kotlinx.coroutines.DispatchedKt.resume(Dispatched.kt:277)
+ * at kotlinx.coroutines.DispatchedKt.dispatch(Dispatched.kt:266)
+ *
+ * first two elements will be returned.
+ */
+private fun <E : Throwable> meaningfulActualStackTrace(exception: E): List<StackTraceElement> {
+    val stackTrace = exception.stackTrace
+    val index = stackTrace.indexOfFirst { "kotlin.coroutines.jvm.internal.BaseContinuationImpl" == it.className }
+    if (index == -1) return emptyList()
+    return stackTrace.slice(0 until index)
 }
 
 
@@ -74,8 +94,7 @@ internal actual fun <E : Throwable> unwrap(exception: E): E {
         return exception
     }
 
-    val element = exception.stackTrace.firstOrNull() ?: return exception
-    if (element.isArtificial()) {
+    if (exception.stackTrace.any { it.isArtificial() }) {
         @Suppress("UNCHECKED_CAST")
         return exception.cause as? E ?: exception
     } else {

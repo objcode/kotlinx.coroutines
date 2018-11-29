@@ -41,7 +41,7 @@ class SuppresionTests : TestBase() {
 
             override fun onCancellation(cause: Throwable?) {
                 assertTrue(cause is ArithmeticException)
-                assertTrue(cause!!.suppressed.isEmpty())
+                assertTrue(cause.suppressed.isEmpty())
                 expect(5)
             }
 
