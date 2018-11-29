@@ -24,7 +24,9 @@ private fun <E : Throwable> E.sanitizeStackTrace(): E {
 
     val lastIntrinsic = stackTrace.indexOfFirst { "kotlinx.coroutines.internal.ExceptionsKt" == it.className }
     val startIndex = lastIntrinsic + 1
-    val trace = Array(size - lastIntrinsic) {
+    val endIndex = stackTrace.indexOfFirst { "kotlin.coroutines.jvm.internal.BaseContinuationImpl" == it.className }
+    val adjustment = if (endIndex == -1) 0 else size - endIndex
+    val trace = Array(size - lastIntrinsic - adjustment) {
         if (it == 0) {
             artificialFrame("Current coroutine stacktrace")
         } else {

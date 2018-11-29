@@ -119,8 +119,7 @@ class StackTraceRecoveryTest : TestBase() {
                         "\tat kotlinx.coroutines.channels.AbstractChannel.receiveResult(AbstractChannel.kt:574)\n" +
                         "\tat kotlinx.coroutines.channels.AbstractChannel.receive(AbstractChannel.kt:567)\n" +
                         "\tat kotlinx.coroutines.exceptions.StackTraceRecoveryTest.channelNestedMethod(StackTraceRecoveryTest.kt:117)\n" +
-                        "\tat kotlinx.coroutines.exceptions.StackTraceRecoveryTest\$testReceiveFromClosedChannel\$1.invokeSuspend(StackTraceRecoveryTest.kt:111)\n" +
-                        "\tat kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:32)",
+                        "\tat kotlinx.coroutines.exceptions.StackTraceRecoveryTest\$testReceiveFromClosedChannel\$1.invokeSuspend(StackTraceRecoveryTest.kt:111)\n",
                 "Caused by: java.lang.IllegalArgumentException\n" +
                         "\tat kotlinx.coroutines.exceptions.StackTraceRecoveryTest\$testReceiveFromClosedChannel\$1.invokeSuspend(StackTraceRecoveryTest.kt:110)"
             )
