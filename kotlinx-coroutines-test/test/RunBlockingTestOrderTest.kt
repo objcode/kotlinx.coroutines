@@ -16,41 +16,44 @@ class RunBlockingTestOrderTest : TestBase() {
     val timeout = Timeout.seconds(1)
 
     @Test
-    fun testImmediateExecution() = runBlockingTest {
-        expect(1)
-        launch {
-            expect(2)
-        }
-        finish(3)
-    }
-
-    @Test
-    fun testImmediateNestedExecution() = runBlockingTest {
-        expect(1)
-        launch {
-            expect(2)
-            launch {
-                expect(3)
-            }
-        }
-        finish(4)
-    }
-
-    @Test
     fun testExecutionOrder() = runBlockingTest {
         expect(1)
         launch {
             expect(2)
+        }
+        runCurrent()
+        finish(3)
+    }
+
+    @Test
+    fun testNestedExecutionOrder() = runBlockingTest {
+        expect(1)
+        launch {
+            expect(2)
             launch {
                 expect(3)
+            }
+        }
+        runCurrent()
+        finish(4)
+    }
+
+    @Test
+    fun testComplexExecutionOrder() = runBlockingTest {
+        expect(1)
+        launch {
+            expect(2)
+            launch {
+                expect(4)
                 yield()
                 expect(6)
             }
-            expect(4)
+            expect(3)
             yield()
-            finish(7)
+            expect(5)
         }
-        expect(5)
+        runCurrent()
+        finish(7)
     }
 
     @Test
@@ -62,6 +65,7 @@ class RunBlockingTestOrderTest : TestBase() {
             expect(4)
             42
         }
+        runCurrent()
         expect(3)
         assertEquals(42, result.await())
         finish(5)

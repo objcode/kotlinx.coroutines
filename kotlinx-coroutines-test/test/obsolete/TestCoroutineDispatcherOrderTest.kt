@@ -29,6 +29,7 @@ class TestCoroutineDispatcherOrderTest : TestBase() {
             assertEquals(2_001, dispatcher.currentTime)
             expect(7)
         }
+        scope.runCurrent()
         expect(3)
         assertEquals(0, dispatcher.currentTime)
         dispatcher.advanceTimeBy(2_000)
@@ -39,5 +40,60 @@ class TestCoroutineDispatcherOrderTest : TestBase() {
         assertEquals(2_002, dispatcher.currentTime)
         scope.cleanupTestCoroutines()
         finish(9)
+    }
+
+    @Test
+    fun waitForDispatcherBusy_exitsImmediately() {
+        val subject = TestCoroutineDispatcher()
+        val scope = TestCoroutineScope(subject)
+
+        scope.launch {
+
+        }
+
+        runBlocking {
+            assertRunsFast {
+                scope.waitForDispatcherBusy(1)
+            }
+        }
+    }
+
+    @Test(expected = TimeoutCancellationException::class)
+    fun waitForDispatcherBusy_timetIfInFuture() {
+        val subject = TestCoroutineDispatcher()
+        val scope = TestCoroutineScope(subject)
+
+        scope.launch {
+            delay(1_000)
+        }
+
+        runBlocking {
+            assertRunsFast {
+                scope.runCurrent()
+                scope.waitForDispatcherBusy(1)
+            }
+        }
+    }
+
+    @Test
+    fun waitForDispatcherBusy_resumesIfResumedByOtherThreadAsync() {
+        val subject = TestCoroutineDispatcher()
+        val scope = TestCoroutineScope(subject)
+        newFixedThreadPoolContext(1, "other pool").use { otherDispatcher ->
+            scope.launch {
+                delay(50)
+                withContext(otherDispatcher) {
+                    delay(1)
+                }
+            }
+
+            runBlocking {
+                scope.advanceTimeBy(50)
+                assertRunsFast {
+                    scope.waitForDispatcherBusy(3_000)
+                }
+            }
+
+        }
     }
 }

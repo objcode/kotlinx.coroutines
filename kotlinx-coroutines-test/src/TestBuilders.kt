@@ -12,11 +12,14 @@ import kotlin.coroutines.*
 private const val DEFAULT_WAIT_FOR_OTHER_DISPATCHERS = 30_000L
 
 /**
- * Executes a [testBody] inside an immediate execution dispatcher.
+ * Executes a [testBody] inside an dispatcher that gurantees controlled, repeatable execution.
  *
- * This is similar to [runBlocking] but it will immediately progress past delays and into [launch] and [async] blocks.
- * You can use this to write tests that execute in the presence of calls to [delay] without causing your test to take
- * extra time.
+ * This is similar to [runBlocking] but it uses [TestCoroutineScope] to allow explict control over execution using the
+ * [DelayController] interface. When used for single-threaded testing, the ordering of execution is guranteed to be
+ * determistic (that means it always executes in the same order).
+ *
+ * When using for multi-threaded testing (e.g. calls to [withContext]), [runBlockingTest] will wait for the other
+ * dispatcher to return control then resume execution.
  *
  * ```
  * @Test
@@ -27,7 +30,7 @@ private const val DEFAULT_WAIT_FOR_OTHER_DISPATCHERS = 30_000L
  *             delay(1_000)
  *         }.await()
  *     }
- *
+ *     advanceTimeBy(2_000)
  *     deferred.await() // result available immediately
  * }
  *
@@ -36,7 +39,8 @@ private const val DEFAULT_WAIT_FOR_OTHER_DISPATCHERS = 30_000L
  * This method requires that all coroutines launched inside [testBody] complete, or are cancelled, as part of the test
  * conditions.
  *
- * Unhandled exceptions thrown by coroutines in the test will be re-thrown at the end of the test.
+ * Unhandled exceptions thrown by coroutines started in the [TestCoroutineScope] will be re-thrown at the end of the
+ * test.
  *
  * @throws UncompletedCoroutinesError If the [testBody] does not complete (or cancel) all coroutines that it launches
  * (including coroutines suspended on join/await).
@@ -64,7 +68,7 @@ public fun runBlockingTest(
         localTestScope.testBody()
     }
 
-    val didTimeout = deferred.waitForCompletion(waitForOtherDispatchers, dispatcher, dispatcher as IdleWaiter)
+    val didTimeout = deferred.waitForCompletion(waitForOtherDispatchers, dispatcher)
 
     if (deferred.isCompleted) {
         deferred.getCompletionExceptionOrNull()?.let {
@@ -87,14 +91,27 @@ public fun runBlockingTest(
     }
 }
 
-private fun Deferred<Unit>.waitForCompletion(wait: Long, delayController: DelayController, park: IdleWaiter): Boolean {
+/**
+ * Convenience method for calling [runBlockingTest] on an existing [TestCoroutineScope].
+ */
+// todo: need documentation on how this extension is supposed to be used
+@ExperimentalCoroutinesApi // Since 1.2.1, tentatively till 1.3.0
+public fun TestCoroutineScope.runBlockingTest(waitForOtherDispatchers: Long = DEFAULT_WAIT_FOR_OTHER_DISPATCHERS, block: suspend TestCoroutineScope.() -> Unit) = runBlockingTest(coroutineContext, waitForOtherDispatchers, block)
+
+/**
+ * Convenience method for calling [runBlockingTest] on an existing [TestCoroutineDispatcher].
+ */
+@ExperimentalCoroutinesApi // Since 1.2.1, tentatively till 1.3.0
+public fun TestCoroutineDispatcher.runBlockingTest(waitForOtherDispatchers: Long = DEFAULT_WAIT_FOR_OTHER_DISPATCHERS, block: suspend TestCoroutineScope.() -> Unit) = runBlockingTest(this, waitForOtherDispatchers, block)
+
+private fun Deferred<Unit>.waitForCompletion(wait: Long, delayController: DelayController): Boolean {
     var didTimeout = false
 
     runBlocking {
         val unparkChannel = Channel<Unit>(1)
         val job = launch {
             while(true) {
-                park.suspendUntilNextDispatch()
+                delayController.waitForDispatcherBusy(wait)
                 unparkChannel.send(Unit)
             }
         }
@@ -121,24 +138,10 @@ private fun CoroutineContext.activeJobs(): Set<Job> {
     return checkNotNull(this[Job]).children.filter { it.isActive }.toSet()
 }
 
-/**
- * Convenience method for calling [runBlockingTest] on an existing [TestCoroutineScope].
- */
-// todo: need documentation on how this extension is supposed to be used
-@ExperimentalCoroutinesApi // Since 1.2.1, tentatively till 1.3.0
-public fun TestCoroutineScope.runBlockingTest(waitForOtherDispatchers: Long = DEFAULT_WAIT_FOR_OTHER_DISPATCHERS, block: suspend TestCoroutineScope.() -> Unit) = runBlockingTest(coroutineContext, waitForOtherDispatchers, block)
-
-/**
- * Convenience method for calling [runBlockingTest] on an existing [TestCoroutineDispatcher].
- */
-@ExperimentalCoroutinesApi // Since 1.2.1, tentatively till 1.3.0
-public fun TestCoroutineDispatcher.runBlockingTest(waitForOtherDispatchers: Long = DEFAULT_WAIT_FOR_OTHER_DISPATCHERS, block: suspend TestCoroutineScope.() -> Unit) = runBlockingTest(this, waitForOtherDispatchers, block)
-
 private fun CoroutineContext.checkArguments(): Pair<CoroutineContext, DelayController> {
     // TODO optimize it
     val dispatcher = get(ContinuationInterceptor).run {
         this?.let { require(this is DelayController) { "Dispatcher must implement DelayController: $this" } }
-        this?.let { require(this is IdleWaiter) { "Dispatcher must implement IdleWaiter" } }
         this ?: TestCoroutineDispatcher()
     }
 

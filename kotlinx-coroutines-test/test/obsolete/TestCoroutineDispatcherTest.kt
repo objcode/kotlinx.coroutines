@@ -27,7 +27,6 @@ class TestCoroutineDispatcherTest {
     fun whenStringCalled_itShowsQueuedJobs() {
         val subject = TestCoroutineDispatcher()
         val scope = TestCoroutineScope(subject)
-        scope.pauseDispatcher()
         scope.launch {
             delay(1_000)
         }
@@ -41,7 +40,6 @@ class TestCoroutineDispatcherTest {
     @Test
     fun whenDispatcherPaused_doesntAutoProgressCurrent() {
         val subject = TestCoroutineDispatcher()
-        subject.pauseDispatcher()
         val scope = CoroutineScope(subject)
         var executed = 0
         scope.launch {
@@ -59,6 +57,7 @@ class TestCoroutineDispatcherTest {
             executed++
         }
 
+        subject.runCurrent()
         assertEquals(1, executed)
     }
 
@@ -80,7 +79,6 @@ class TestCoroutineDispatcherTest {
     @Test
     fun whenDispatcherPaused_thenResume_itDoesDispatchCurrent() {
         val subject = TestCoroutineDispatcher()
-        subject.pauseDispatcher()
         val scope = CoroutineScope(subject)
         var executed = 0
         scope.launch {
@@ -88,14 +86,13 @@ class TestCoroutineDispatcherTest {
         }
 
         assertEquals(0, executed)
-        subject.resumeDispatcher()
+        subject.runCurrent()
         assertEquals(1, executed)
     }
 
     @Test(expected = UncompletedCoroutinesError::class)
     fun whenDispatcherHasUncompletedCoroutines_itThrowsErrorInCleanup() {
         val subject = TestCoroutineDispatcher()
-        subject.pauseDispatcher()
         val scope = CoroutineScope(subject)
         scope.launch {
             delay(1_000)
@@ -108,17 +105,20 @@ class TestCoroutineDispatcherTest {
         val currentThread = Thread.currentThread()
         val subject = TestCoroutineDispatcher()
         val scope = TestCoroutineScope(subject)
-
-        val deferred = scope.async(Dispatchers.Default) {
-            withContext(subject) {
-                assertNotSame(currentThread, Thread.currentThread())
-                3
+        newFixedThreadPoolContext(1, "other dispatcher").use { otherDispatcher ->
+            val deferred = scope.async(otherDispatcher) {
+                withContext(subject) {
+                    assertSame(currentThread, Thread.currentThread())
+                    3
+                }
             }
-        }
 
-        runBlocking {
             // just to ensure the above code terminates
-            assertEquals(3, deferred.await())
+            runBlocking {
+                scope.waitForDispatcherBusy(100)
+            }
+            scope.runCurrent()
+            runBlocking { withTimeout(100) { deferred.await() } }
         }
     }
 
@@ -137,6 +137,7 @@ class TestCoroutineDispatcherTest {
 
         runBlocking {
             // just to ensure the above code terminates
+            scope.runCurrent()
             assertEquals(3, deferred.await())
         }
     }

@@ -58,12 +58,11 @@ class TestRunBlockingOrderTest : TestBase() {
 
         val numbersFromOtherDispatcherWithDelays = flow { for(x in 1..max) { emit(x) } }
                 .buffer(0)
-                .delayEach(1)
+                .onEach { delay(1) }
                 .flowOn(otherDispatcher)
 
         otherDispatcher.use {
             runBlockingTest {
-                pauseDispatcher()
                 numbersFromOtherDispatcherWithDelays.collect { value ->
                     expect(value)
                 }
@@ -78,7 +77,7 @@ class TestRunBlockingOrderTest : TestBase() {
         val otherDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
         val numbersFromOtherDispatcherWithDelays = flow { emit(1) }
-                .delayEach(1)
+                .onEach { delay(1) }
                 .buffer(0)
                 .flowOn(otherDispatcher)
 
@@ -87,13 +86,15 @@ class TestRunBlockingOrderTest : TestBase() {
                 numbersFromOtherDispatcherWithDelays.collect { value ->
                     expect(value)
                     launch {
-                        expect(2)
+                        expect(3)
                     }
                 }
-                expect(3)
+                expect(2)
+                runCurrent()
+                expect(4)
             }
         }
-        finish(4)
+        finish(5)
     }
 
     @Test
@@ -104,7 +105,7 @@ class TestRunBlockingOrderTest : TestBase() {
 
         val numbersFromOtherDispatcherWithDelays = flow { for(x in 1..max) { emit(x)} }
                 .filter { it % 2 == 1 }
-                .delayEach(1)
+                .onEach { delay(1) }
                 .buffer(0)
                 .flowOn(otherDispatcher)
 
@@ -158,7 +159,6 @@ class TestRunBlockingOrderTest : TestBase() {
     fun whenDispatcherPaused_runBlocking_dispatchesToTestThread() {
         val thread = Thread.currentThread()
         runBlockingTest {
-            pauseDispatcher()
             withContext(Dispatchers.IO) {
                 expect(1)
                 delay(1)
@@ -170,23 +170,24 @@ class TestRunBlockingOrderTest : TestBase() {
     }
 
     @Test
-    fun whenDispatcherResumed_runBlocking_dispatchesImmediatelyOnIO() {
+    fun whenDispatcherResumed_runBlocking_dispatchesCorrectlyOnOtherDispatcher() {
         var thread: Thread? = null
+        val otherDispatcher = newFixedThreadPoolContext(1, "other dispatcher")
         runBlockingTest {
-            resumeDispatcher()
-            withContext(Dispatchers.IO) {
+            withContext(otherDispatcher) {
                 expect(1)
                 delay(1)
                 expect(2)
                 thread = Thread.currentThread()
             }
-            assertEquals(thread, Thread.currentThread())
+            assertNotSame(thread, Thread.currentThread())
             finish(3)
         }
+        otherDispatcher.close()
     }
 
     @Test
-    fun whenDispatcherRunning_doesntProgressDelays_inLaunchBody() {
+    fun doesntProgressDelays_inLaunchBody() {
         var state = 0
         fun CoroutineScope.subject() = launch {
             state = 1
@@ -196,6 +197,7 @@ class TestRunBlockingOrderTest : TestBase() {
 
         runBlockingTest {
             subject()
+            runCurrent()
             assertEquals(1, state)
             advanceTimeBy(1000)
             assertEquals(2, state)

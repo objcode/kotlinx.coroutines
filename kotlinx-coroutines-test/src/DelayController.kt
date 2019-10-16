@@ -22,9 +22,6 @@ public interface DelayController {
     /**
      * Moves the Dispatcher's virtual clock forward by a specified amount of time.
      *
-     * The amount the clock is progressed may be larger than the requested `delayTimeMillis` if the code under test uses
-     * blocking coroutines.
-     *
      * The virtual clock time will advance once for each delay resumed until the next delay exceeds the requested
      * `delayTimeMills`. In the following test, the virtual time will progress by 2_000 then 1 to resume three different
      * calls to delay.
@@ -60,7 +57,7 @@ public interface DelayController {
     /**
      * Immediately execute all pending tasks and advance the virtual clock-time to the last delay.
      *
-     * If new tasks are scheduled due to advancing virtual time, they will be executed before `advanceUntilIdle`
+     * If new tasks are scheduled while advancing virtual time, they will be executed before `advanceUntilIdle`
      * returns.
      *
      * @return the amount of delay-time that this Dispatcher's clock has been forwarded in milliseconds.
@@ -87,63 +84,54 @@ public interface DelayController {
     public fun cleanupTestCoroutines()
 
     /**
-     * Run a block of code in a paused dispatcher.
+     * Suspends until at least one task may be executed by calling [runCurrent].
      *
-     * By pausing the dispatcher any new coroutines will not execute immediately. After block executes, the dispatcher
-     * will resume auto-advancing.
+     * If this method returns normally, there must be at least one task that can be executed by calling [runCurrent]. It
+     * will return immediately if there is already a task in the queue for the current time.
      *
-     * This is useful when testing functions that start a coroutine. By pausing the dispatcher assertions or
-     * setup may be done between the time the coroutine is created and started.
+     * This is useful when another dispatcher is currently processing a coroutine and is expected to dispatch the result
+     * to this dispatcher. This most commonly happens due to calls to [withContext] or [Deferred.await].
      *
-     * While in the paused block, the dispatcher will queue all dispatched coroutines and they will be resumed on
-     * whatever thread calls [advanceUntilIdle], [advanceTimeBy], or [runCurrent].
-     */
-    @ExperimentalCoroutinesApi // Since 1.2.1, tentatively till 1.3.0
-    public suspend fun pauseDispatcher(block: suspend () -> Unit)
-
-    /**
-     * Pause the dispatcher.
-     *
-     * When paused, the dispatcher will not execute any coroutines automatically, and you must call [runCurrent] or
-     * [advanceTimeBy], or [advanceUntilIdle] to execute coroutines.
-     *
-     * While paused, the dispatcher will queue all dispatched coroutines and they will be resumed on whatever thread
-     * calls [advanceUntilIdle], [advanceTimeBy], or [runCurrent].
-     */
-    @ExperimentalCoroutinesApi // Since 1.2.1, tentatively till 1.3.0
-    public fun pauseDispatcher()
-
-    /**
-     * Resume the dispatcher from a paused state.
-     *
-     * Resumed dispatchers will automatically progress through all coroutines scheduled at the current time. To advance
-     * time and execute coroutines scheduled in the future use, one of [advanceTimeBy],
-     * or [advanceUntilIdle].
-     *
-     * When the dispatcher is resumed, all execution be immediate in the thread that triggered it similar to
-     * [Dispatchers.Unconfined]. This means that the following code will not switch back from Dispatchers.IO after
-     * `withContext`
+     * Note: You should not need to call this function from inside [runBlockingTest] as it calls it implicitly, but it
+     *       is required for thread coordination in in tests that don't use `runBlockingTest` and interact with multiple
+     *       threads.
      *
      * ```
-     * runBlockingTest {
-     *     withContext(Dispatchers.IO) { doIo() }
-     *     // runBlockingTest is still on Dispatchers.IO here
+     * val otherDispatcher = // single threaded dispatcher
+     *
+     * suspend fun switchingThreads() {
+     *     withContext(otherDispatcher) {
+     *         // this is not executing on TestCoroutineDispatcher
+     *         database.query()
+     *     }
+     *     println("run me after waiting for withContext")
+     * }
+     *
+     * @Test whenSwitchingThreads_resultsBecomeAvailable() {
+     *      val scope = TestCoroutineScope()
+     *
+     *      val job = scope.launch {
+     *          switchingThreads()
+     *      }
+     *
+     *      scope.runCurrent() // run to withContext, which will dispatch on otherDispatcher
+     *      runBlocking {
+     *          // wait for otherDispatcher to return control of the coroutine to TestCoroutineDispatcher
+     *          scope.waitForDispatcherBusy(2_000) // throws timeout exception if withContext doesn't finish in 2_000ms
+     *      }
+     *      scope.runCurrent() // run the dispatched task (everything after withContext)
+     *      // job.isCompleted == true
      * }
      * ```
      *
-     * For tests that need accurate threading behavior, [pauseDispatcher] will ensure that the following test dispatches
-     * on a controlled thread.
+     * Whenever possible, it is preferred to inject [TestCoroutineDispatcher] to the [withContext] call instead of
+     * calling `waitForDispatcherBusy` as it creates a single threaded test and avoids thread synchronization issues.
      *
-     * ```
-     * runBlockingTest {
-     *     pauseDispatcher()
-     *     withContext(Dispatchers.IO) { doIo() }
-     *     // runBlockingTest has returned to it's starting thread here
-     * }
-     * ```
+     * Calling this method will never change the virtual-time.
+     *
+     * @param timeoutMills how long to wait for a task to be dispatched to this dispatcher.
      */
-    @ExperimentalCoroutinesApi // Since 1.2.1, tentatively till 1.3.0
-    public fun resumeDispatcher()
+    suspend fun waitForDispatcherBusy(timeoutMills: Long)
 }
 
 /**

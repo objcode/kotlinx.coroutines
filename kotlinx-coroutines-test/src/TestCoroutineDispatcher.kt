@@ -14,33 +14,22 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.math.max
 
 /**
- * [CoroutineDispatcher] that performs both immediate and lazy execution of coroutines in tests
+ * [CoroutineDispatcher] that offers lazy, determistic, execution of coroutines in tests
  * and implements [DelayController] to control its virtual clock.
  *
- * By default, [TestCoroutineDispatcher] is immediate. That means any tasks scheduled to be run without delay are
- * immediately executed. If they were scheduled with a delay, the virtual clock-time must be advanced via one of the
- * methods on [DelayController].
+ * Any coroutines started via [launch] or [async] will not execute until a call to [DelayController.runCurrent] or the
+ * virtual clock-time has been advanced via one of the methods on [DelayController].
  *
- * When switched to lazy execution using [pauseDispatcher] any coroutines started via [launch] or [async] will
- * not execute until a call to [DelayController.runCurrent] or the virtual clock-time has been advanced via one of the
- * methods on [DelayController].
- *
- * While in immediate mode [TestCoroutineDispatcher] behaves similar to [Dispatchers.Unconfined]. When resuming from
- * another thread it will *not* switch threads. When in lazy mode, [TestCoroutineDispatcher] will enqueue all
- * dispatches and whatever thread calls an [advanceUntilIdle], [advanceTimeBy], or [runCurrent] will continue execution.
+ * [TestCoroutineDispatcher] does not hold a thread, so if a coroutine switches to another thread via [withContext] or
+ * similar, this dispatcher will not automatically wait for the other thread to pass control back. Tests can wait for
+ * the other dispatcher by calling [DelayController.waitForDispatcherBusy], then call [DelayController.runCurrent] to
+ * run the dispatched task from the test thread. Tests that use [runBlockingTest] do not need to call
+ * [DelayController.waitForDispatcherBusy].
  *
  * @see DelayController
  */
 @ExperimentalCoroutinesApi // Since 1.2.1, tentatively till 1.3.0
-public class TestCoroutineDispatcher: CoroutineDispatcher(), Delay, DelayController, IdleWaiter {
-    private var dispatchImmediately = true
-        set(value) {
-            field = value
-            if (value) {
-                // there may already be tasks from setup code we need to run
-                advanceUntilIdle()
-            }
-        }
+public class TestCoroutineDispatcher: CoroutineDispatcher(), Delay, DelayController {
 
     // The ordered queue for the runnable tasks.
     private val queue = ThreadSafeHeap<TimedRunnable>()
@@ -55,12 +44,7 @@ public class TestCoroutineDispatcher: CoroutineDispatcher(), Delay, DelayControl
 
     /** @suppress */
     override fun dispatch(context: CoroutineContext, block: Runnable) {
-        if (dispatchImmediately) {
-            block.run()
-            unpark()
-        } else {
-            post(block)
-        }
+        post(block)
     }
 
     /** @suppress */
@@ -156,27 +140,6 @@ public class TestCoroutineDispatcher: CoroutineDispatcher(), Delay, DelayControl
     }
 
     /** @suppress */
-    override suspend fun pauseDispatcher(block: suspend () -> Unit) {
-        val previous = dispatchImmediately
-        dispatchImmediately = false
-        try {
-            block()
-        } finally {
-            dispatchImmediately = previous
-        }
-    }
-
-    /** @suppress */
-    override fun pauseDispatcher() {
-        dispatchImmediately = false
-    }
-
-    /** @suppress */
-    override fun resumeDispatcher() {
-        dispatchImmediately = true
-    }
-
-    /** @suppress */
     override fun cleanupTestCoroutines() {
         unpark()
         // process any pending cancellations or completions, but don't advance time
@@ -200,8 +163,16 @@ public class TestCoroutineDispatcher: CoroutineDispatcher(), Delay, DelayControl
         }
     }
 
-    override suspend fun suspendUntilNextDispatch() {
-        waitLock.receive()
+    override suspend fun waitForDispatcherBusy(timeoutMills: Long) {
+        withTimeout(timeoutMills) {
+            while (true) {
+                val nextTime = queue.peek()?.time
+                if (nextTime != null && nextTime <= currentTime) {
+                    break
+                }
+                waitLock.receive()
+            }
+        }
     }
 
     private fun unpark() {
@@ -238,21 +209,4 @@ private class TimedRunnable(
     }
 
     override fun toString() = "TimedRunnable(time=$time, run=$runnable)"
-}
-
-/**
- * Alternative implementations of [TestCoroutineDispatcher] must implement this interface in order to be supported by
- * [runBlockingTest].
- *
- * This interface allows external code to suspend itself until the next dispatch is received. This is similar to park in
- * a normal event loop, but doesn't require that [TestCoroutineDispatcher] block a thread while parked.
- */
-interface IdleWaiter {
-    /**
-     * Attempt to suspend until the next dispatch is received.
-     *
-     * This method may resume immediately if any dispatch was received since the last time it was called. This ensures
-     * that dispatches won't be dropped if they happen just before calling [suspendUntilNextDispatch].
-     */
-    public suspend fun suspendUntilNextDispatch()
 }

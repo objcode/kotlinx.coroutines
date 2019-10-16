@@ -29,41 +29,35 @@ class TestRunBlockingTest {
     @Test
     fun pauseDispatcher_disablesAutoAdvance_forCurrent() = runBlockingTest {
         var mutable = 0
-        pauseDispatcher {
-            launch {
-                mutable++
-            }
-            assertEquals(0, mutable)
-            runCurrent()
-            assertEquals(1, mutable)
+        launch {
+            mutable++
         }
+        assertEquals(0, mutable)
+        runCurrent()
+        assertEquals(1, mutable)
     }
 
     @Test
     fun pauseDispatcher_disablesAutoAdvance_forDelay() = runBlockingTest {
         var mutable = 0
-        pauseDispatcher {
-            launch {
-                mutable++
-                delay(SLOW)
-                mutable++
-            }
-            assertEquals(0, mutable)
-            runCurrent()
-            assertEquals(1, mutable)
-            advanceTimeBy(SLOW)
-            assertEquals(2, mutable)
+        launch {
+            mutable++
+            delay(SLOW)
+            mutable++
         }
+        assertEquals(0, mutable)
+        runCurrent()
+        assertEquals(1, mutable)
+        advanceTimeBy(SLOW)
+        assertEquals(2, mutable)
     }
 
     @Test
     fun pauseDispatcher_withDelay_resumesAfterPause() = runBlockingTest {
         var mutable = 0
         assertRunsFast {
-            pauseDispatcher {
-                delay(1_000)
-                mutable++
-            }
+            delay(1_000)
+            mutable++
         }
         assertEquals(1, mutable)
     }
